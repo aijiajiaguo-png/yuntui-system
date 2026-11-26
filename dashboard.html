@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>云推分发 · 今日看板</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f5f7; color: #222; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 14px 40px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  h1 { font-size: 19px; margin: 2px 0 4px; }
+  .sub { color: #888; font-size: 13px; }
+  .next { font-size: 15px; font-weight: 600; }
+  .next span { color: #d33; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; }
+  .stat b { display: block; font-size: 26px; }
+  .stat.blue b { color: #2563eb; }
+  .stat small { color: #888; font-size: 12px; }
+  .dead { color: #d33; font-weight: 700; }
+  .task { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid #f0f0f0; }
+  .task:last-child { border-bottom: none; }
+  .task .name { flex: 1; font-size: 14px; }
+  .task .num { font-size: 14px; color: #666; min-width: 44px; text-align: right; }
+  .task .bar { height: 6px; background: #eee; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+  .task .bar i { display: block; height: 100%; background: #2563eb; }
+  .task.done .name { color: #1a7f37; }
+  .task .col { flex: 1; }
+  button { border: none; border-radius: 8px; padding: 7px 12px; font-size: 14px; cursor: pointer; }
+  .btn-add { background: #2563eb; color: #fff; }
+  .btn-undo { background: #eee; color: #666; }
+  .btn-primary { background: #2563eb; color: #fff; width: 100%; padding: 11px; font-size: 15px; }
+  input, select { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 7px 4px; border-bottom: 1px solid #f0f0f0; text-align: left; word-break: break-all; }
+  th { color: #888; font-weight: 400; }
+  .ok { color: #1a7f37; } .bad { color: #d33; }
+  .muted { color: #888; font-size: 12px; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 9px 16px; border-radius: 20px; font-size: 14px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>云推分发 · 今日看板</h1>
+    <div class="sub" id="dateLine">加载中…</div>
+    <div class="next" style="margin-top:10px">下一批：<span id="nextBatch">—</span></div>
+    <div style="margin-top:8px"><input id="nextBatchInput" placeholder="改下一批，如：19:30 贴吧·截流·第 1 轮">
+    <button class="btn-primary" style="margin-top:6px" onclick="setNextBatch()">更新下一批</button></div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px">今日资源流转 <span class="dead" id="deadBadge"></span></h1>
+    <div class="grid" style="margin-top:10px">
+      <div class="stat"><small>今日点击 PV</small><b id="pv">0</b></div>
+      <div class="stat"><small>独立访客 UV</small><b id="uv">0</b></div>
+      <div class="stat blue"><small>预估转存</small><b id="saves">0</b></div>
+      <div class="stat"><small>被点开的短链</small><b id="opened">0</b></div>
+    </div>
+    <div class="muted" id="chanLine" style="margin-top:10px"></div>
+    <div class="muted">来源：服务器访问日志（api-access.log 及轮转 gz，JSON 格式）按 /r/ 路径 + 状态 302 计数，渠道按 ?c= 参数拆分 · 预估转存 = PV × 系数（定期用真实转存数校准）</div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px">各线今日进度 <span class="muted" id="taskSummary"></span></h1>
+    <div id="tasks"></div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px">新建短链</h1>
+    <input id="fTitle" placeholder="标题，如：纪录片《地球脉动》资源">
+    <input id="fTarget" placeholder="真实推广链接（http(s)://…），如云推巨量的推广链接">
+    <input id="fChannel" placeholder="渠道，如：weibo / tieba / zhihu">
+    <input id="fAccount" placeholder="账号，如：微博·Time-200810">
+    <input id="fCode" placeholder="短链码（可空，自动生成 6 位）">
+    <button class="btn-primary" onclick="createLink()">生成短链</button>
+    <div id="newLinkOut" style="margin-top:8px;font-size:14px"></div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px">短链管理</h1>
+    <input id="search" placeholder="搜索账号名、短链码、帖子标题…" oninput="renderLinks()">
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>短链</th><th>标题 / 渠道 / 账号</th><th>今日点击</th><th>状态</th></tr></thead>
+      <tbody id="linkRows"></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+let TOKEN = localStorage.getItem('yt_token') || '';
+let LINKS = {}, STATS = {}, HEALTH = {};
+if (!TOKEN) {
+  TOKEN = prompt('第一次打开，请输入管理 token（在服务器 config.json 里）') || '';
+  if (TOKEN) localStorage.setItem('yt_token', TOKEN);
+}
+const $ = id => document.getElementById(id);
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(()=>t.style.display='none', 2200); }
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  return r.json();
+}
+async function loadAll() {
+  try {
+    STATS = await api('/api/stats');
+    LINKS = await api('/api/links');
+    HEALTH = await api('/api/health');
+    const tasks = await api('/api/tasks');
+    $('dateLine').textContent = STATS.date + ' · 最后同步 ' + new Date().toLocaleTimeString('zh-CN', {hour12:false}) + ' · 自动同步';
+    $('nextBatch').textContent = STATS.next_batch || '未设置';
+    $('pv').textContent = STATS.pv; $('uv').textContent = STATS.uv;
+    $('saves').textContent = STATS.est_saves; $('opened').textContent = STATS.opened_links;
+    $('deadBadge').textContent = STATS.dead_count ? '失效 ' + STATS.dead_count : '';
+    $('chanLine').textContent = Object.entries(STATS.channels).map(([k,v]) => k + ' ' + v).join(' · ') || '今日暂无点击';
+    let done = 0, quota = 0;
+    $('tasks').innerHTML = tasks.map(t => {
+      done += t.done; quota += t.quota;
+      const pct = t.quota ? Math.round(t.done / t.quota * 100) : 0;
+      return `<div class="task ${t.done >= t.quota ? 'done' : ''}">
+        <div class="col"><div class="name">${t.name}</div><div class="bar"><i style="width:${pct}%"></i></div></div>
+        <div class="num">${t.done}/${t.quota}</div>
+        <button class="btn-undo" onclick="taskOp(${t.id},'undo')">-1</button>
+        <button class="btn-add" onclick="taskOp(${t.id},'done')">+1</button>
+      </div>`;
+    }).join('');
+    $('taskSummary').textContent = '已完成 ' + done + '/' + quota;
+    renderLinks();
+  } catch (e) { $('dateLine').textContent = '加载失败，检查服务是否在运行'; }
+}
+function renderLinks() {
+  const q = ($('search').value || '').toLowerCase();
+  const rows = Object.entries(LINKS).filter(([code, v]) =>
+    !q || code.toLowerCase().includes(q) || (v.title||'').toLowerCase().includes(q) ||
+    (v.account||'').toLowerCase().includes(q) || (v.channel||'').toLowerCase().includes(q));
+  $('linkRows').innerHTML = rows.map(([code, v]) => {
+    const h = HEALTH[code];
+    const st = h ? (h.alive ? '<span class="ok">正常</span>' : '<span class="bad">失效</span>') : '<span class="muted">未检测</span>';
+    return `<tr><td><a href="/r/${code}" target="_blank">/r/${code}</a></td>
+      <td>${v.title||''}<br><span class="muted">${v.channel||''} · ${v.account||''}</span></td>
+      <td>${STATS.per_code?.[code] || 0}</td><td>${st}</td></tr>`;
+  }).join('') || '<tr><td colspan="4" class="muted">暂无短链，先新建一条</td></tr>';
+}
+async function taskOp(id, op) {
+  const r = await api('/api/tasks/' + op + '?token=' + encodeURIComponent(TOKEN),
+    {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id})});
+  if (r.ok) loadAll(); else toast(r.error || '操作失败');
+}
+async function createLink() {
+  const body = { target: $('fTarget').value.trim(), title: $('fTitle').value.trim(),
+    channel: $('fChannel').value.trim(), account: $('fAccount').value.trim(),
+    code: $('fCode').value.trim() };
+  if (!body.target) return toast('先填真实推广链接');
+  const r = await api('/api/links?token=' + encodeURIComponent(TOKEN),
+    {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (r.ok) {
+    const url = location.origin + '/r/' + r.code;
+    $('newLinkOut').innerHTML = '已生成：<a href="' + url + '" target="_blank">' + url + '</a>（发帖时就贴这个）';
+    loadAll();
+  } else toast(r.error || '生成失败（token 不对？）');
+}
+async function setNextBatch() {
+  const v = $('nextBatchInput').value.trim();
+  if (!v) return toast('先填下一批内容');
+  const r = await api('/api/next_batch?token=' + encodeURIComponent(TOKEN),
+    {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({next_batch: v})});
+  if (r.ok) { toast('已更新'); loadAll(); } else toast(r.error || '更新失败');
+}
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>

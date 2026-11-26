@@ -1,0 +1,9 @@
+# Render 免费托管部署配置
+# 步骤: 把本目录推到 GitHub -> render.com 新建 Web Service 选这个仓库 -> 自动按此文件部署
+services:
+  - type: web
+    name: yuntui-system
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 app.py
+    # 免费档说明: 15 分钟无访问会休眠, 下一次点短链要等几秒唤醒; 每月 750 小时免费额度够用
