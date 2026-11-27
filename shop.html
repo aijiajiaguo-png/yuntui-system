@@ -102,14 +102,14 @@ async function loadProducts() {
   $('shopContact').textContent = SHOP.contact || '请在管理页设置';
   $('products').innerHTML = (d.products || []).map(p => {
     const stock = p.stock_type === 'cdk'
-      ? (p.stock > 0 ? `<span class="stock ok">有货 ${p.stock} 件</span>` : `<span class="stock out">缺货</span>`)
+      ? (p.stock > 0 ? `<span class="stock ok">有货 ${p.stock} 件</span>` : `<span class="stock ok">可下单 · 付款后调货</span>`)
       : `<span class="stock ok">现货</span>`;
     return `<div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center"><h1 style="font-size:16px">${p.name}</h1>${stock}</div>
       <div class="desc">${p.desc || ''}</div>
       <div><span class="price">¥${p.price}</span> <small class="muted">/ 月</small></div>
       <input id="contact-${p.id}" placeholder="留你的微信号或 QQ 号，用于售后联系">
-      <button class="btn-primary" style="margin-top:6px" ${p.stock_type === 'cdk' && p.stock <= 0 ? 'disabled' : ''} onclick="createOrder('${p.id}')">立即购买</button>
+      <button class="btn-primary" style="margin-top:6px" onclick="createOrder('${p.id}')">立即购买</button>
     </div>`;
   }).join('') || '<div class="card muted">暂无商品</div>';
 }

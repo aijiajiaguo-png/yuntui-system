@@ -219,10 +219,8 @@ def handle_shop(method, path, query, headers, body, client_ip):
                 p = products.get(pid)
                 if not p or not p.get("active", True):
                     return _json_body({"ok": False, "error": "商品不存在或已下架"}, 404)
-                if p.get("stock_type", "cdk") == "cdk":
-                    inv = load_json(INVENTORY_PATH, {})
-                    if len(inv.get(pid, [])) <= 0:
-                        return _json_body({"ok": False, "error": "暂时缺货，请联系客服"}, 400)
+                # 中介模式: 没库存也能下单, 客户先付款, 店主再去供货商拿货;
+                # 付款确认后无库存的卡密单进 waiting_stock, 等拿货后发货。
                 cfg = shop_config()
                 rate = float(cfg.get("usdt_rate") or 7.2)
                 price = float(p.get("price", 0))
@@ -352,6 +350,8 @@ def handle_shop(method, path, query, headers, body, client_ip):
                         code = codes.pop(0)
                         inv[o["product_id"]] = codes
                         save_json(INVENTORY_PATH, inv)
+                if not code and not (data.get("note") or "").strip():
+                    return _json_body({"ok": False, "error": "没有可发的卡密，请先加库存或填写卡密/备注"}, 400)
                 o["code"] = code
                 if data.get("note"):
                     o["note"] = str(data["note"])
