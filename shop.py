@@ -201,6 +201,86 @@ def handle_shop(method, path, query, headers, body, client_ip):
             inv = load_json(INVENTORY_PATH, {})
             return _json_body({"ok": True,
                                "stock": {pid: len(c) for pid, c in inv.items()}})
+        if path == "/api/shop/admin/stats":
+            if not _require_token(query):
+                return _json_body({"ok": False, "error": "token 不对"}, 403)
+            orders = list(load_json(ORDERS_PATH, {}).values())
+            products = load_json(PRODUCTS_PATH, {})
+            inv = load_json(INVENTORY_PATH, {})
+            paid_status = ("paid", "waiting_stock", "fulfilled")
+            today = _today()
+            days = [(_now().date() - timedelta(days=i)).isoformat()
+                    for i in range(6, -1, -1)]
+            by_day = {d: {"date": d, "orders": 0, "revenue": 0.0}
+                      for d in days}
+            total = {"orders": len(orders), "paid_orders": 0,
+                     "revenue": 0.0, "profit": None,
+                     "today_orders": 0, "today_revenue": 0.0,
+                     "today_profit": None,
+                     "pending_confirm": 0, "waiting_stock": 0}
+            by_status = {}
+            per_product = {}
+            for o in orders:
+                st = o.get("status", "")
+                by_status[st] = by_status.get(st, 0) + 1
+                if st == "pending_confirm":
+                    total["pending_confirm"] += 1
+                if st == "waiting_stock":
+                    total["waiting_stock"] += 1
+                pid = o.get("product_id", "")
+                p = products.get(pid, {})
+                cost = float(p.get("cost", 0) or 0)
+                price = float(o.get("price", 0) or 0)
+                pp = per_product.setdefault(pid, {
+                    "id": pid, "name": p.get("name", o.get("product_name", pid)),
+                    "price": price, "cost": cost, "orders": 0, "paid": 0,
+                    "revenue": 0.0, "profit": None,
+                    "stock": len(inv.get(pid, [])), "waiting": 0})
+                pp["orders"] += 1
+                if st in ("pending_confirm", "waiting_stock"):
+                    pp["waiting"] += 1
+                if st in paid_status:
+                    pp["paid"] += 1
+                    pp["revenue"] += price
+                    if cost > 0:
+                        pp["profit"] = (pp["profit"] or 0) + (price - cost)
+                        total["profit"] = (total["profit"] or 0) + (price - cost)
+                    total["paid_orders"] += 1
+                    total["revenue"] += price
+                    day = (o.get("created", "") or "")[:10]
+                    if day in by_day:
+                        by_day[day]["orders"] += 1
+                        by_day[day]["revenue"] += price
+                    if day == today:
+                        total["today_orders"] += 1
+                        total["today_revenue"] += price
+                        if cost > 0:
+                            total["today_profit"] = (total["today_profit"] or 0) + (price - cost)
+            for pid, p in products.items():
+                if pid not in per_product:
+                    per_product[pid] = {"id": pid, "name": p.get("name", pid),
+                        "price": float(p.get("price", 0) or 0),
+                        "cost": float(p.get("cost", 0) or 0), "orders": 0,
+                        "paid": 0, "revenue": 0.0, "profit": None,
+                        "stock": len(inv.get(pid, [])), "waiting": 0}
+            total["revenue"] = round(total["revenue"], 2)
+            total["today_revenue"] = round(total["today_revenue"], 2)
+            if total["profit"] is not None:
+                total["profit"] = round(total["profit"], 2)
+            if total["today_profit"] is not None:
+                total["today_profit"] = round(total["today_profit"], 2)
+            for pp in per_product.values():
+                pp["revenue"] = round(pp["revenue"], 2)
+                if pp["profit"] is not None:
+                    pp["profit"] = round(pp["profit"], 2)
+            for d in by_day.values():
+                d["revenue"] = round(d["revenue"], 2)
+            return _json_body({"ok": True, "total": total,
+                               "by_status": by_status,
+                               "per_product": sorted(per_product.values(),
+                                                    key=lambda x: x["revenue"],
+                                                    reverse=True),
+                               "by_day": [by_day[d] for d in days]})
         return _json_body({"ok": False, "error": "unknown"}, 404)
 
     # ---------- POST ----------

@@ -28,15 +28,46 @@
   .st.pending_confirm, .st.paid, .st.waiting_stock { color: #2563eb; }
   .st.fulfilled { color: #1a7f37; }
   .st.cancelled { color: #d33; }
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .stat { background: #f6f8fa; border-radius: 10px; padding: 10px 12px; }
+  .stat b { font-size: 20px; display: block; }
+  .stat span { color: #888; font-size: 12px; }
+  .bar { height: 8px; background: #2563eb; border-radius: 4px; min-width: 2px; }
   #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 9px 16px; border-radius: 20px; font-size: 14px; display: none; }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="card">
-    <h1>店铺管理</h1>
-    <div class="sub">订单确认、卡密库存、商品与收款设置 · <a href="/shop" target="_blank">打开店铺前台</a> · <a href="/">回 CPS 看板</a></div>
+    <h1>店铺管理（商家端）</h1>
+    <div class="sub">订单确认、卡密库存、商品与收款设置 · <a href="/shop" target="_blank">打开店铺前台（客户端）</a> · <a href="/">回 CPS 看板</a></div>
     <div class="muted" id="stockLine" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>数据统计</h2>
+    <div class="stats-grid">
+      <div class="stat"><b id="stTodayRev">¥0</b><span>今日收入</span></div>
+      <div class="stat"><b id="stTodayOrd">0</b><span>今日订单（已付款）</span></div>
+      <div class="stat"><b id="stTodayProfit">—</b><span>今日利润</span></div>
+      <div class="stat"><b id="stPending">0</b><span>待确认收款</span></div>
+      <div class="stat"><b id="stWaiting">0</b><span>待发货 / 等货</span></div>
+      <div class="stat"><b id="stTotalRev">¥0</b><span>累计收入</span></div>
+      <div class="stat"><b id="stTotalProfit">—</b><span>累计利润</span></div>
+      <div class="stat"><b id="stTotalOrd">0</b><span>累计订单</span></div>
+      <div class="stat"><b id="stPaidOrd">0</b><span>已付款订单</span></div>
+    </div>
+    <div style="margin-top:12px"><b style="font-size:14px">各商品销量</b></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>商品</th><th>售价</th><th>销量</th><th>收入</th><th>利润</th><th>库存</th><th>待处理</th></tr></thead>
+      <tbody id="prodStats"></tbody>
+    </table></div>
+    <div style="margin-top:12px"><b style="font-size:14px">近 7 天</b></div>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>日期</th><th>订单</th><th>收入</th><th></th></tr></thead>
+      <tbody id="dayStats"></tbody>
+    </table></div>
+    <div class="muted" style="margin-top:6px">收入按已付款订单算（待付款、待确认、已取消不算）；利润 = 收入 − 成本，成本没核对的商品利润显示“待核对”。</div>
   </div>
 
   <div class="card">
@@ -92,7 +123,28 @@ async function api(path, opts) { const r = await fetch(path, opts); return r.jso
 const T = () => '?token=' + encodeURIComponent(TOKEN);
 const STATUS_TEXT = { pending_pay: '待付款', pending_confirm: '待确认收款', paid: '已收款待发货', waiting_stock: '已付款等货', fulfilled: '已发货', cancelled: '已取消' };
 let DATA = {};
+async function loadStats() {
+  const d = await api('/api/shop/admin/stats' + T());
+  if (!d.ok) return;
+  const t = d.total || {};
+  const money = v => (v === null || v === undefined) ? '—' : '¥' + v;
+  $('stTodayRev').textContent = money(t.today_revenue);
+  $('stTodayOrd').textContent = t.today_orders || 0;
+  $('stTodayProfit').textContent = money(t.today_profit);
+  $('stPending').textContent = t.pending_confirm || 0;
+  $('stWaiting').textContent = t.waiting_stock || 0;
+  $('stTotalRev').textContent = money(t.revenue);
+  $('stTotalProfit').textContent = money(t.profit);
+  $('stTotalOrd').textContent = t.orders || 0;
+  $('stPaidOrd').textContent = t.paid_orders || 0;
+  $('prodStats').innerHTML = (d.per_product || []).map(p =>
+    `<tr><td>${p.name}</td><td>¥${p.price}</td><td>${p.paid}</td><td>¥${p.revenue}</td><td>${p.paid === 0 ? '¥0' : (p.profit === null ? '待核对' : '¥' + p.profit)}</td><td>${p.stock} 件</td><td>${p.waiting ? p.waiting + ' 单' : '—'}</td></tr>`).join('') || '<tr><td colspan="7" class="muted">暂无商品</td></tr>';
+  const maxRev = Math.max(1, ...(d.by_day || []).map(x => x.revenue || 0));
+  $('dayStats').innerHTML = (d.by_day || []).map(x =>
+    `<tr><td>${x.date.slice(5)}</td><td>${x.orders}</td><td>¥${x.revenue}</td><td style="width:40%"><div class="bar" style="width:${Math.round(x.revenue / maxRev * 100)}%"></div></td></tr>`).join('');
+}
 async function loadAll() {
+  loadStats();
   const d = await api('/api/shop/admin/orders' + T());
   if (!d.ok) { toast(d.error || '加载失败（token 不对？）'); return; }
   DATA = d;
