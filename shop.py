@@ -141,6 +141,8 @@ def _public_products():
         if item["stock_type"] == "cdk":
             item["stock"] = len(inv.get(pid, []))
         out.append(item)
+    # 店里按价格从低到高展示
+    out.sort(key=lambda x: float(x.get("price", 0)))
     return out
 
 
