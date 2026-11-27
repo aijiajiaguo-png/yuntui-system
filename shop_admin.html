@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>店铺管理 · AI 补给站</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f5f7; color: #222; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 14px 40px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  h1 { font-size: 19px; margin: 2px 0 4px; }
+  h2 { font-size: 16px; margin: 2px 0 8px; }
+  .sub { color: #888; font-size: 13px; }
+  button { border: none; border-radius: 8px; padding: 7px 12px; font-size: 14px; cursor: pointer; }
+  .btn-primary { background: #2563eb; color: #fff; width: 100%; padding: 11px; font-size: 15px; }
+  .btn-add { background: #2563eb; color: #fff; }
+  .btn-ghost { background: #eee; color: #333; }
+  .btn-danger { background: #fdecea; color: #d33; }
+  input, textarea, select { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+  textarea { min-height: 80px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { padding: 7px 4px; border-bottom: 1px solid #f0f0f0; text-align: left; word-break: break-all; }
+  th { color: #888; font-weight: 400; }
+  .muted { color: #888; font-size: 12px; line-height: 1.6; }
+  .st { font-weight: 700; }
+  .st.pending_pay { color: #b26a00; }
+  .st.pending_confirm, .st.paid, .st.waiting_stock { color: #2563eb; }
+  .st.fulfilled { color: #1a7f37; }
+  .st.cancelled { color: #d33; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 9px 16px; border-radius: 20px; font-size: 14px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>店铺管理</h1>
+    <div class="sub">订单确认、卡密库存、商品与收款设置 · <a href="/shop" target="_blank">打开店铺前台</a> · <a href="/">回 CPS 看板</a></div>
+    <div class="muted" id="stockLine" style="margin-top:8px"></div>
+  </div>
+
+  <div class="card">
+    <h2>订单</h2>
+    <div style="overflow-x:auto"><table>
+      <thead><tr><th>订单号 / 时间</th><th>商品 / 金额</th><th>联系方式 / 哈希</th><th>状态</th><th>操作</th></tr></thead>
+      <tbody id="orderRows"></tbody>
+    </table></div>
+    <button class="btn-ghost" style="margin-top:8px" onclick="loadAll()">刷新</button>
+  </div>
+
+  <div class="card">
+    <h2>加卡密库存</h2>
+    <select id="invPid"></select>
+    <textarea id="invCodes" placeholder="每行一个卡密，如：&#10;XXXX-XXXX-XXXX&#10;YYYY-YYYY-YYYY"></textarea>
+    <button class="btn-primary" onclick="addInventory()">加入库存</button>
+  </div>
+
+  <div class="card">
+    <h2>商品管理</h2>
+    <div id="prodList" class="muted"></div>
+    <input id="pId" placeholder="商品 id（新建可空，自动生成；修改填现有 id）">
+    <input id="pName" placeholder="商品名，如：ChatGPT Plus 月卡｜菲区 CDK">
+    <input id="pDesc" placeholder="商品说明（要求、质保、限制）">
+    <input id="pPrice" placeholder="售价（元），如：135" type="number" step="0.01">
+    <input id="pCost" placeholder="成本价（元，仅自己可见），如：110" type="number" step="0.01">
+    <select id="pType"><option value="cdk">卡密自动发码</option><option value="manual">人工代充/发货</option></select>
+    <label class="muted"><input type="checkbox" id="pActive" checked style="width:auto"> 上架</label>
+    <button class="btn-primary" style="margin-top:6px" onclick="saveProduct()">保存商品</button>
+  </div>
+
+  <div class="card">
+    <h2>收款设置</h2>
+    <input id="cName" placeholder="店铺名">
+    <input id="cUsdt" placeholder="USDT 收款地址（BEP20/BSC 钱包地址）">
+    <input id="cNet" placeholder="网络，如：BEP20 (BSC)">
+    <input id="cRate" placeholder="人民币兑 USDT 汇率，如：7.2" type="number" step="0.01">
+    <input id="cContact" placeholder="客服联系方式，如：微信 xxx / QQ xxx">
+    <textarea id="cNotice" placeholder="购买须知"></textarea>
+    <button class="btn-primary" onclick="saveConfig()">保存设置</button>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+let TOKEN = localStorage.getItem('yt_token') || '';
+if (!TOKEN) {
+  TOKEN = prompt('请输入管理 token（和 CPS 看板同一个）') || '';
+  if (TOKEN) localStorage.setItem('yt_token', TOKEN);
+}
+const $ = id => document.getElementById(id);
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(()=>t.style.display='none', 2200); }
+async function api(path, opts) { const r = await fetch(path, opts); return r.json(); }
+const T = () => '?token=' + encodeURIComponent(TOKEN);
+const STATUS_TEXT = { pending_pay: '待付款', pending_confirm: '待确认收款', paid: '已收款待发货', waiting_stock: '已付款等货', fulfilled: '已发货', cancelled: '已取消' };
+let DATA = {};
+async function loadAll() {
+  const d = await api('/api/shop/admin/orders' + T());
+  if (!d.ok) { toast(d.error || '加载失败（token 不对？）'); return; }
+  DATA = d;
+  $('stockLine').textContent = '库存：' + Object.entries(d.stock).map(([k, v]) => {
+    const p = (d.products || {})[k];
+    return (p ? p.name : k) + ' ' + v + ' 件';
+  }).join(' · ') || '暂无库存';
+  $('orderRows').innerHTML = (d.orders || []).map(o => {
+    let ops = '';
+    if (o.status === 'pending_confirm' || o.status === 'pending_pay') ops += `<button class="btn-add" onclick="confirmOrder('${o.order_no}')">确认收款</button> `;
+    if (o.status === 'paid' || o.status === 'waiting_stock') ops += `<button class="btn-add" onclick="fulfillOrder('${o.order_no}')">发货</button> `;
+    if (o.status === 'pending_pay' || o.status === 'pending_confirm') ops += `<button class="btn-danger" onclick="cancelOrder('${o.order_no}')">取消</button>`;
+    return `<tr><td>${o.order_no}<br><span class="muted">${o.created || ''}</span></td>
+      <td>${o.product_name}<br>¥${o.price}（约 ${o.usdt_amount || '-'} USDT）</td>
+      <td>${o.contact || ''}<br><span class="muted">${o.tx_hash || ''}</span>${o.code ? '<br>码：<b>' + o.code + '</b>' : ''}</td>
+      <td><span class="st ${o.status}">${STATUS_TEXT[o.status] || o.status}</span></td>
+      <td>${ops}</td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">暂无订单</td></tr>';
+  $('invPid').innerHTML = Object.entries(d.products || {}).map(([id, p]) =>
+    `<option value="${id}">${p.name}（${p.stock_type === 'cdk' ? '卡密' : '人工'}）</option>`).join('');
+  $('prodList').innerHTML = Object.entries(d.products || {}).map(([id, p]) =>
+    `<div>${p.active ? '●' : '○'} ${p.name} —— 售价 ¥${p.price} / 成本 ¥${p.cost || '-'} / ${p.stock_type} / id: ${id}</div>`).join('') || '暂无商品';
+  const s = d.shop || {};
+  $('cName').value = s.name || ''; $('cUsdt').value = s.usdt_address || '';
+  $('cNet').value = s.usdt_network || ''; $('cRate').value = s.usdt_rate || '';
+  $('cContact').value = s.contact || ''; $('cNotice').value = s.notice || '';
+}
+async function confirmOrder(no) {
+  const r = await api('/api/shop/admin/orders/' + no + '/confirm' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  if (r.ok) { toast('已确认：' + (r.order.status === 'fulfilled' ? '已自动发码 ' + (r.order.code || '') : r.order.status)); loadAll(); }
+  else toast(r.error || '确认失败');
+}
+async function fulfillOrder(no) {
+  const note = prompt('发货备注（可空，如代充完成时间）') || '';
+  const code = prompt('手动发码可填卡密（有库存会自动取码，可空）') || '';
+  const r = await api('/api/shop/admin/orders/' + no + '/fulfill' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({note, code})});
+  if (r.ok) { toast('已发货'); loadAll(); } else toast(r.error || '发货失败');
+}
+async function cancelOrder(no) {
+  if (!confirm('确定取消订单 ' + no + '？')) return;
+  const r = await api('/api/shop/admin/orders/' + no + '/cancel' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: '{}'});
+  if (r.ok) { toast('已取消'); loadAll(); } else toast(r.error || '取消失败');
+}
+async function addInventory() {
+  const pid = $('invPid').value;
+  const text = $('invCodes').value;
+  if (!pid || !text.trim()) return toast('先选商品并粘贴卡密');
+  const r = await api('/api/shop/admin/inventory' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({product_id: pid, text})});
+  if (r.ok) { toast('已加入 ' + r.added + ' 条，库存共 ' + r.total + ' 条'); $('invCodes').value = ''; loadAll(); }
+  else toast(r.error || '加入失败');
+}
+async function saveProduct() {
+  const body = { id: $('pId').value.trim(), name: $('pName').value.trim(), desc: $('pDesc').value.trim(),
+    price: parseFloat($('pPrice').value) || 0, cost: parseFloat($('pCost').value) || 0,
+    stock_type: $('pType').value, active: $('pActive').checked };
+  if (!body.name) return toast('先填商品名');
+  const r = await api('/api/shop/admin/products' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (r.ok) { toast('已保存'); loadAll(); } else toast(r.error || '保存失败');
+}
+async function saveConfig() {
+  const body = { shop: { name: $('cName').value.trim(), usdt_address: $('cUsdt').value.trim(),
+    usdt_network: $('cNet').value.trim(), usdt_rate: parseFloat($('cRate').value) || 7.2,
+    contact: $('cContact').value.trim(), notice: $('cNotice').value.trim() } };
+  const r = await api('/api/shop/admin/config' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  if (r.ok) { toast('设置已保存'); loadAll(); } else toast(r.error || '保存失败');
+}
+loadAll();
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI 补给站</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f4f5f7; color: #222; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 12px 14px 40px; }
+  .card { background: #fff; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  h1 { font-size: 19px; margin: 2px 0 4px; }
+  .sub { color: #888; font-size: 13px; }
+  .price { font-size: 24px; color: #d33; font-weight: 700; }
+  .price small { font-size: 13px; color: #888; font-weight: 400; }
+  .stock { font-size: 13px; padding: 2px 8px; border-radius: 10px; }
+  .stock.ok { background: #e6f4ea; color: #1a7f37; }
+  .stock.out { background: #fdecea; color: #d33; }
+  .desc { font-size: 14px; color: #555; margin: 8px 0; line-height: 1.6; }
+  button { border: none; border-radius: 8px; padding: 7px 12px; font-size: 14px; cursor: pointer; }
+  .btn-primary { background: #2563eb; color: #fff; width: 100%; padding: 11px; font-size: 15px; }
+  .btn-ghost { background: #eee; color: #333; }
+  input { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+  .muted { color: #888; font-size: 12px; line-height: 1.6; }
+  .code-box { background: #f6f8fa; border: 1px dashed #bbb; border-radius: 8px; padding: 12px; font-size: 16px; font-weight: 700; text-align: center; word-break: break-all; margin: 8px 0; }
+  .addr { background: #f6f8fa; border-radius: 8px; padding: 10px; font-size: 13px; word-break: break-all; margin: 6px 0; }
+  .status { font-weight: 700; font-size: 15px; }
+  .status.pending_pay { color: #b26a00; }
+  .status.pending_confirm, .status.paid, .status.waiting_stock { color: #2563eb; }
+  .status.fulfilled { color: #1a7f37; }
+  .status.cancelled { color: #d33; }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: #222; color: #fff; padding: 9px 16px; border-radius: 20px; font-size: 14px; display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1 id="shopName">AI 补给站</h1>
+    <div class="sub">AI 会员卡密 · 自动发码 · 质保 30 天</div>
+    <div class="muted" id="shopNotice" style="margin-top:8px"></div>
+  </div>
+
+  <div id="products"></div>
+
+  <div class="card" id="orderCard" style="display:none">
+    <h1 style="font-size:16px">付款</h1>
+    <div>订单号：<b id="oNo"></b></div>
+    <div style="margin-top:6px">商品：<span id="oProduct"></span></div>
+    <div style="margin-top:6px">应付：<span class="price">¥<span id="oPrice"></span></span>
+      <span class="muted">（约 <b id="oUsdt"></b> USDT）</span></div>
+    <div id="payUsdt" style="margin-top:10px">
+      <div class="muted">USDT 收款地址（<span id="oNet"></span>，请按上方 USDT 金额精确转账）：</div>
+      <div class="addr" id="oAddr"></div>
+      <button class="btn-ghost" onclick="copyText($('oAddr').textContent, '地址已复制')">复制地址</button>
+      <button class="btn-ghost" onclick="copyText($('oUsdt').textContent, '金额已复制')">复制金额</button>
+    </div>
+    <div class="muted" id="payAlt" style="margin-top:8px"></div>
+    <div style="margin-top:10px">
+      <input id="txHash" placeholder="粘贴交易哈希（TxHash），付款后提交">
+      <button class="btn-primary" onclick="submitTx()">我已付款，提交交易哈希</button>
+    </div>
+    <div class="muted" style="margin-top:8px">提交后请在下方查单；客服确认收款后自动发码。订单号请保存好，查单和售后都要用。</div>
+  </div>
+
+  <div class="card">
+    <h1 style="font-size:16px">查单 / 取码</h1>
+    <input id="qNo" placeholder="输入订单号，如 S20261127xxxx">
+    <button class="btn-primary" onclick="queryOrder()">查询订单</button>
+    <div id="qOut" style="margin-top:10px"></div>
+  </div>
+
+  <div class="card">
+    <div class="muted">客服：<span id="shopContact">—</span><br>
+    数字商品售出后不支持退款；请勿向任何人提供账号密码、短信验证码。</div>
+  </div>
+</div>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id);
+let SHOP = {}, ORDER = null;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(()=>t.style.display='none', 2200); }
+function copyText(txt, msg) {
+  if (navigator.clipboard) navigator.clipboard.writeText(txt).then(()=>toast(msg));
+  else { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); toast(msg); }
+}
+async function api(path, opts) { const r = await fetch(path, opts); return r.json(); }
+const STATUS_TEXT = { pending_pay: '待付款', pending_confirm: '已提交付款凭证，等待确认', paid: '已确认收款，等待发货', waiting_stock: '已付款，等货中', fulfilled: '已发货', cancelled: '已取消' };
+async function loadProducts() {
+  const d = await api('/api/shop/products');
+  SHOP = d.shop || {};
+  $('shopName').textContent = SHOP.name || 'AI 补给站';
+  $('shopNotice').textContent = SHOP.notice || '';
+  $('shopContact').textContent = SHOP.contact || '请在管理页设置';
+  $('products').innerHTML = (d.products || []).map(p => {
+    const stock = p.stock_type === 'cdk'
+      ? (p.stock > 0 ? `<span class="stock ok">有货 ${p.stock} 件</span>` : `<span class="stock out">缺货</span>`)
+      : `<span class="stock ok">现货</span>`;
+    return `<div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center"><h1 style="font-size:16px">${p.name}</h1>${stock}</div>
+      <div class="desc">${p.desc || ''}</div>
+      <div><span class="price">¥${p.price}</span> <small class="muted">/ 月</small></div>
+      <input id="contact-${p.id}" placeholder="留你的微信号或 QQ 号，用于售后联系">
+      <button class="btn-primary" style="margin-top:6px" ${p.stock_type === 'cdk' && p.stock <= 0 ? 'disabled' : ''} onclick="createOrder('${p.id}')">立即购买</button>
+    </div>`;
+  }).join('') || '<div class="card muted">暂无商品</div>';
+}
+async function createOrder(pid) {
+  const contact = ($('contact-' + pid).value || '').trim();
+  if (contact.length < 2) return toast('先留微信号或 QQ 号');
+  const r = await api('/api/shop/orders', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({product_id: pid, contact})});
+  if (!r.ok) return toast(r.error || '下单失败');
+  ORDER = r;
+  $('orderCard').style.display = 'block';
+  $('oNo').textContent = r.order_no;
+  $('oProduct').textContent = '';
+  $('oPrice').textContent = r.price;
+  $('oUsdt').textContent = r.usdt_amount;
+  $('oNet').textContent = SHOP.usdt_network || '';
+  $('oAddr').textContent = r.usdt_address || '（店主尚未设置收款地址，请联系客服）';
+  $('payAlt').textContent = SHOP.contact ? ('或联系客服 ' + SHOP.contact + ' 微信/支付宝转账，备注订单号 ' + r.order_no) : '';
+  $('qNo').value = r.order_no;
+  window.scrollTo(0, $('orderCard').offsetTop);
+  toast('订单已创建：' + r.order_no);
+}
+async function submitTx() {
+  if (!ORDER) return toast('先下单');
+  const tx = ($('txHash').value || '').trim();
+  if (tx.length < 10) return toast('请粘贴完整交易哈希');
+  const r = await api('/api/shop/orders/' + ORDER.order_no + '/paytx', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({tx_hash: tx})});
+  if (r.ok) { toast('已提交，等待确认收款'); queryOrder(); } else toast(r.error || '提交失败');
+}
+async function queryOrder() {
+  const no = ($('qNo').value || '').trim();
+  if (!no) return toast('先输入订单号');
+  const r = await api('/api/shop/orders/' + encodeURIComponent(no));
+  if (!r.ok) { $('qOut').innerHTML = '<span style="color:#d33">' + (r.error || '查询失败') + '</span>'; return; }
+  let html = `<div>订单号：<b>${r.order_no}</b></div>
+    <div style="margin-top:4px">商品：${r.product_name}</div>
+    <div style="margin-top:4px">金额：¥${r.price}</div>
+    <div style="margin-top:4px">状态：<span class="status ${r.status}">${STATUS_TEXT[r.status] || r.status}</span></div>`;
+  if (r.status === 'fulfilled' && r.code) {
+    html += `<div style="margin-top:10px">你的卡密（请立即兑换并保存）：</div>
+      <div class="code-box">${r.code}</div>
+      <button class="btn-ghost" onclick="copyText('${r.code}', '卡密已复制')">复制卡密</button>`;
+  }
+  if (r.note) html += `<div class="muted" style="margin-top:6px">备注：${r.note}</div>`;
+  $('qOut').innerHTML = html;
+}
+loadProducts();
+</script>
+</body>
+</html>

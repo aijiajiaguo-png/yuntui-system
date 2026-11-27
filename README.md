@@ -92,3 +92,10 @@
 - 每天零点后统计自动按新日期算；任务进度每天手动清零（把 `data/tasks.json` 里 done 改回 0，
   或看板上 -1 点回去；后续版本可加自动清零）
 - token 不要发给别人，知道 token 就能新建短链、改任务
+
+## 轻量小店 v1（/shop，与 CPS 看板同站）
+- 前台：`/shop`（商品、下单、USDT 付款、提交交易哈希、查单取码）
+- 管理：`/shop/admin`（订单确认/发货、加卡密库存、商品管理、收款设置），与看板用同一个管理 token
+- 首品：ChatGPT Plus 月卡｜菲区 CDK，售价 135 元（成本 110 元，待供应商回复后核对）
+- 收款：USDT 手动确认（地址、网络、汇率在 config.json 的 "shop" 里或管理页设置）；确认收款后有库存自动发码
+- 数据：`data/shop_products.json` / `data/shop_orders.json` / `data/shop_inventory.json`

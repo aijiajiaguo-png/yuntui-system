@@ -218,6 +218,18 @@ def handle(method, path, query, headers, body, client_ip):
     """
     ua = headers.get("User-Agent", "") or headers.get("user-agent", "")
 
+    # ---- 轻量小店: /shop* 与 /api/shop* 交给 shop.py 处理 ----
+    # 公开下单不走管理 token (shop.py 内部只对 /admin/* 验 token),
+    # 所以转发必须放在下面 GET/POST 分支的 token 检查之前。
+    if path == "/shop" or path.startswith("/shop/") or path.startswith("/api/shop"):
+        try:
+            from shop import handle_shop
+            res = handle_shop(method, path, query, headers, body, client_ip)
+            if res is not None:
+                return res
+        except Exception as e:
+            return _json_body({"ok": False, "error": "shop error: " + str(e)[:100]}, 500)
+
     if method == "GET":
         # ---- 短链跳转: /r/<code>?c=<渠道> ----
         m = re.match(r"^/r/([A-Za-z0-9_-]+)$", path)
