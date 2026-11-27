@@ -71,6 +71,29 @@
   </div>
 
   <div class="card">
+    <h2>AI 助手（豆包）</h2>
+    <div class="muted">问销量、写文案、回客户都行；回答用的就是上面数据统计里的实时数字，不会瞎编。先在下方设置里填好 API Key 和接入点 ID 才能用。</div>
+    <div id="aiLog" style="margin-top:8px; max-height:260px; overflow-y:auto"></div>
+    <div style="margin-top:8px">
+      <button class="btn-ghost" onclick="askAi('今天卖了多少？')">今天卖了多少？</button>
+      <button class="btn-ghost" onclick="askAi('哪个商品卖得最好？')">哪个卖得最好？</button>
+      <button class="btn-ghost" onclick="askAi('帮我给店里最便宜的商品写一段推广文案')">写推广文案</button>
+      <button class="btn-ghost" onclick="askAi('客户问 Plus 和成品号有什么区别，怎么回？')">回客户问题</button>
+    </div>
+    <textarea id="aiInput" placeholder="问 AI 助手，如：这周哪个商品最赚钱？" style="margin-top:8px"></textarea>
+    <button class="btn-primary" onclick="askAi()">发送</button>
+  </div>
+
+  <div class="card">
+    <h2>豆包 AI 设置</h2>
+    <div class="muted">API Key 和接入点 ID 只存在服务器上（不进公开仓库、不发到聊天里），调用是从你的浏览器直接连豆包。获取方法：火山引擎控制台 → 方舟 → API Key管理（新建 Key）；模型推理 → 接入点管理（选一个豆包模型新建接入点，复制 ep-xxx 开头的 ID）。</div>
+    <input id="aiKey" type="password" placeholder="豆包 API Key">
+    <input id="aiModel" placeholder="接入点 ID，如：ep-xxx（或模型名）">
+    <button class="btn-primary" onclick="saveAiConfig()">保存豆包设置</button>
+    <div class="muted" id="aiStatus" style="margin-top:6px">未设置</div>
+  </div>
+
+  <div class="card">
     <h2>订单</h2>
     <div style="overflow-x:auto"><table>
       <thead><tr><th>订单号 / 时间</th><th>商品 / 金额</th><th>联系方式 / 哈希</th><th>状态</th><th>操作</th></tr></thead>
@@ -143,6 +166,70 @@ async function loadStats() {
   const maxRev = Math.max(1, ...(d.by_day || []).map(x => x.revenue || 0));
   $('dayStats').innerHTML = (d.by_day || []).map(x =>
     `<tr><td>${x.date.slice(5)}</td><td>${x.orders}</td><td>¥${x.revenue}</td><td style="width:40%"><div class="bar" style="width:${Math.round(x.revenue / maxRev * 100)}%"></div></td></tr>`).join('');
+}
+let AI_CFG = {api_key: '', model: ''};
+let AI_HISTORY = [];
+let AI_BUSY = false;
+async function loadAiConfig() {
+  const d = await api('/api/shop/admin/ai-config' + T());
+  if (!d.ok) return;
+  AI_CFG = {api_key: d.api_key || '', model: d.model || ''};
+  $('aiKey').value = AI_CFG.api_key;
+  $('aiModel').value = AI_CFG.model;
+  $('aiStatus').textContent = AI_CFG.api_key ? ('已设置（模型：' + (AI_CFG.model || '未填') + '）') : '未设置';
+}
+async function saveAiConfig() {
+  const key = $('aiKey').value.trim(), model = $('aiModel').value.trim();
+  const r = await api('/api/shop/admin/config' + T(), {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({doubao: {api_key: key, model}})});
+  if (r.ok) { AI_CFG = {api_key: key, model}; $('aiStatus').textContent = key ? ('已设置（模型：' + (model || '未填') + '）') : '未设置'; toast('豆包设置已保存'); }
+  else toast(r.error || '保存失败');
+}
+function aiSay(role, text) {
+  const div = document.createElement('div');
+  div.style.cssText = 'margin-top:6px;padding:8px 10px;border-radius:8px;background:' + (role === 'user' ? '#eaf1fe' : '#f6f8fa');
+  div.textContent = (role === 'user' ? '你：' : 'AI：') + text;
+  $('aiLog').appendChild(div);
+  $('aiLog').scrollTop = $('aiLog').scrollHeight;
+  return div;
+}
+async function askAi(q) {
+  const question = (q || $('aiInput').value || '').trim();
+  if (!question) return toast('先输入问题');
+  if (AI_BUSY) return;
+  if (!AI_CFG.api_key) return toast('先在豆包 AI 设置里填 API Key');
+  if (!AI_CFG.model) return toast('先在豆包 AI 设置里填接入点 ID');
+  AI_BUSY = true;
+  $('aiInput').value = '';
+  aiSay('user', question);
+  const thinking = aiSay('ai', '想一下…');
+  try {
+    const st = await api('/api/shop/admin/stats' + T());
+    const prodLines = (st.per_product || []).map(p => `${p.name}：销量${p.paid}单，收入¥${p.revenue}，库存${p.stock}件`).join('；');
+    const dayLines = (st.by_day || []).map(x => `${x.date}：${x.orders}单¥${x.revenue}`).join('；');
+    const t = st.total || {};
+    const sys = `你是“AI 补给站”网店的商家助手，只回答店主的问题。以下是本店实时数据（今天 ${new Date().toLocaleDateString('zh-CN')}）：今日收入¥${t.today_revenue ?? 0}（${t.today_orders || 0}笔已付款订单），今日利润${t.today_profit === null ? '待核对' : '¥' + t.today_profit}；累计收入¥${t.revenue ?? 0}，累计利润${t.profit === null ? '待核对' : '¥' + t.profit}；待确认收款${t.pending_confirm || 0}笔，待发货/等货${t.waiting_stock || 0}笔。各商品销量：${prodLines}。近7天：${dayLines}。回答要求：用简洁中文；涉及销量、收入、利润数字时只用上面给出的数据，不要编造；数据里没有就直说不知道；帮写文案、回客户时直接给出可用文字。`;
+    const msgs = [{role: 'system', content: sys},
+      ...AI_HISTORY.slice(-6),
+      {role: 'user', content: question}];
+    const r = await fetch('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AI_CFG.api_key},
+      body: JSON.stringify({model: AI_CFG.model, messages: msgs, temperature: 0.7, max_tokens: 1000})});
+    const j = await r.json();
+    thinking.remove();
+    if (!r.ok) {
+      const err = (j.error && (j.error.message || j.error.code)) || ('HTTP ' + r.status);
+      aiSay('ai', '豆包返回错误：' + err + '（401 是 Key 不对，404 是接入点 ID 不对）');
+    } else {
+      const ans = (j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '豆包没有返回内容';
+      AI_HISTORY.push({role: 'user', content: question}, {role: 'assistant', content: ans});
+      aiSay('ai', ans);
+    }
+  } catch (e) {
+    thinking.remove();
+    aiSay('ai', '连不上豆包接口，请检查网络后重试。');
+  }
+  AI_BUSY = false;
 }
 async function loadAll() {
   loadStats();
@@ -222,6 +309,7 @@ async function saveConfig() {
   if (r.ok) { toast('设置已保存'); loadAll(); } else toast(r.error || '保存失败');
 }
 loadAll();
+loadAiConfig();
 setInterval(loadAll, 60000);
 </script>
 </body>

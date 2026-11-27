@@ -281,6 +281,14 @@ def handle_shop(method, path, query, headers, body, client_ip):
                                                     key=lambda x: x["revenue"],
                                                     reverse=True),
                                "by_day": [by_day[d] for d in days]})
+        if path == "/api/shop/admin/ai-config":
+            if not _require_token(query):
+                return _json_body({"ok": False, "error": "token 不对"}, 403)
+            d = load_config().get("doubao", {}) or {}
+            return _json_body({"ok": True,
+                               "api_key": d.get("api_key", ""),
+                               "model": d.get("model", ""),
+                               "configured": bool(d.get("api_key"))})
         return _json_body({"ok": False, "error": "unknown"}, 404)
 
     # ---------- POST ----------
@@ -483,6 +491,7 @@ def handle_shop(method, path, query, headers, body, client_ip):
         # ---- 收款设置 ----
         if path == "/api/shop/admin/config":
             patch = data.get("shop") or {}
+            ai_patch = data.get("doubao") or {}
             with LOCK:
                 cfg = load_config()
                 shop = dict(cfg.get("shop", {}))
@@ -491,6 +500,12 @@ def handle_shop(method, path, query, headers, body, client_ip):
                     if k in patch:
                         shop[k] = patch[k]
                 cfg["shop"] = shop
+                if ai_patch:
+                    ai = dict(cfg.get("doubao", {}))
+                    for k in ("api_key", "model"):
+                        if k in ai_patch:
+                            ai[k] = ai_patch[k]
+                    cfg["doubao"] = ai
                 save_json(CONFIG_PATH, cfg)
             return _json_body({"ok": True, "shop": shop_config()})
 
