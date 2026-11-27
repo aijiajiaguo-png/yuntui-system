@@ -2,5 +2,8 @@
   "next_batch": "18:40 微博·截流互动·第 4 轮（纪录片求资源回复）",
   "port": 8080,
   "save_rate": 0.041,
+  "shop": {
+    "contact": "QQ 3921567550"
+  },
   "token": "set-via-ADMIN_TOKEN-env"
 }
