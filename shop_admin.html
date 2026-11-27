@@ -113,6 +113,7 @@
 <div id="toast"></div>
 <script>
 let TOKEN = localStorage.getItem('yt_token') || '';
+let TOKEN_RETRIED = false;
 if (!TOKEN) {
   TOKEN = prompt('请输入管理 token（和 CPS 看板同一个）') || '';
   if (TOKEN) localStorage.setItem('yt_token', TOKEN);
@@ -146,7 +147,16 @@ async function loadStats() {
 async function loadAll() {
   loadStats();
   const d = await api('/api/shop/admin/orders' + T());
-  if (!d.ok) { toast(d.error || '加载失败（token 不对？）'); return; }
+  if (!d.ok) {
+    // 存的 token 失效了：清掉旧 token，重新问一次（只问一次，避免循环弹窗）
+    if ((d.error || '').indexOf('token') !== -1 && !TOKEN_RETRIED) {
+      TOKEN_RETRIED = true;
+      localStorage.removeItem('yt_token');
+      TOKEN = prompt('token 不对或已失效，请重新输入管理 token（和 CPS 看板同一个）') || '';
+      if (TOKEN) { localStorage.setItem('yt_token', TOKEN); loadAll(); return; }
+    }
+    toast(d.error || '加载失败（token 不对？）'); return;
+  }
   DATA = d;
   $('stockLine').textContent = '库存：' + Object.entries(d.stock).map(([k, v]) => {
     const p = (d.products || {})[k];
