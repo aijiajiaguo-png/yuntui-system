@@ -44,6 +44,14 @@
     <div class="muted" id="stockLine" style="margin-top:8px"></div>
   </div>
 
+  <div class="card" id="tokenCard" style="display:none">
+    <h2>请输入管理 token</h2>
+    <div class="muted">和 CPS 看板同一个 token。</div>
+    <input id="tokenInput" type="password" placeholder="管理 token">
+    <button class="btn-primary" onclick="submitToken()">进入商家端</button>
+    <div class="muted" id="tokenErr" style="margin-top:6px"></div>
+  </div>
+
   <div class="card">
     <h2>数据统计</h2>
     <div class="stats-grid">
@@ -136,10 +144,20 @@
 <div id="toast"></div>
 <script>
 let TOKEN = localStorage.getItem('yt_token') || '';
-let TOKEN_RETRIED = false;
-if (!TOKEN) {
-  TOKEN = prompt('请输入管理 token（和 CPS 看板同一个）') || '';
-  if (TOKEN) localStorage.setItem('yt_token', TOKEN);
+function showTokenCard(msg) {
+  $('tokenCard').style.display = 'block';
+  if (msg) $('tokenErr').textContent = msg;
+  $('tokenInput').focus();
+}
+function submitToken() {
+  const t = $('tokenInput').value.trim();
+  if (!t) return;
+  TOKEN = t;
+  localStorage.setItem('yt_token', t);
+  $('tokenCard').style.display = 'none';
+  $('tokenErr').textContent = '';
+  loadAll();
+  loadAiConfig();
 }
 const $ = id => document.getElementById(id);
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; setTimeout(()=>t.style.display='none', 2200); }
@@ -232,15 +250,16 @@ async function askAi(q) {
   AI_BUSY = false;
 }
 async function loadAll() {
+  if (!TOKEN) { showTokenCard(''); return; }
   loadStats();
   const d = await api('/api/shop/admin/orders' + T());
   if (!d.ok) {
-    // 存的 token 失效了：清掉旧 token，重新问一次（只问一次，避免循环弹窗）
-    if ((d.error || '').indexOf('token') !== -1 && !TOKEN_RETRIED) {
-      TOKEN_RETRIED = true;
+    // 存的 token 失效了：清掉旧 token，显示页面内的输入框重新输入
+    if ((d.error || '').indexOf('token') !== -1) {
       localStorage.removeItem('yt_token');
-      TOKEN = prompt('token 不对或已失效，请重新输入管理 token（和 CPS 看板同一个）') || '';
-      if (TOKEN) { localStorage.setItem('yt_token', TOKEN); loadAll(); return; }
+      TOKEN = '';
+      showTokenCard('token 不对或已失效，请重新输入管理 token（和 CPS 看板同一个）');
+      return;
     }
     toast(d.error || '加载失败（token 不对？）'); return;
   }
