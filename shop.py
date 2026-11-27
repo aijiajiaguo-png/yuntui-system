@@ -238,10 +238,30 @@ def handle_shop(method, path, query, headers, body, client_ip):
                 }
                 save_json(ORDERS_PATH, orders)
             return _json_body({"ok": True, "order_no": no, "price": price,
+                               "product_name": orders[no]["product_name"],
                                "usdt_amount": orders[no]["usdt_amount"],
                                "usdt_address": cfg.get("usdt_address", ""),
                                "usdt_network": cfg.get("usdt_network", ""),
                                "contact": cfg.get("contact", "")})
+
+        # ---- 买家点「我已付款」: 人民币微信/支付宝转账, 无交易哈希 ----
+        if path.startswith("/api/shop/orders/") and path.endswith("/paid"):
+            no = path[len("/api/shop/orders/"):-len("/paid")].strip("/")
+            m = (data.get("method") or "cny").strip()
+            with LOCK:
+                orders = load_json(ORDERS_PATH, {})
+                o = orders.get(no)
+                if not o:
+                    return _json_body({"ok": False, "error": "订单不存在"}, 404)
+                if o.get("status") != "pending_pay":
+                    return _json_body({"ok": False, "error": "该订单当前状态不能提交付款凭证"}, 400)
+                o["status"] = "pending_confirm"
+                o["payment_method"] = m
+                if m == "cny":
+                    o["note"] = (data.get("note") or "微信/支付宝付款").strip()
+                o["paid_at"] = _ts()
+                save_json(ORDERS_PATH, orders)
+            return _json_body({"ok": True, "status": "pending_confirm"})
 
         # ---- 买家提交交易哈希 (不用 token) ----
         if path.startswith("/api/shop/orders/") and path.endswith("/paytx"):

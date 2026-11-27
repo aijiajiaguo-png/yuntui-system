@@ -107,7 +107,7 @@ async function loadAll() {
     if (o.status === 'pending_pay' || o.status === 'pending_confirm') ops += `<button class="btn-danger" onclick="cancelOrder('${o.order_no}')">取消</button>`;
     return `<tr><td>${o.order_no}<br><span class="muted">${o.created || ''}</span></td>
       <td>${o.product_name}<br>¥${o.price}（约 ${o.usdt_amount || '-'} USDT）</td>
-      <td>${o.contact || ''}<br><span class="muted">${o.tx_hash || ''}</span>${o.code ? '<br>码：<b>' + o.code + '</b>' : ''}</td>
+      <td>${o.contact || ''}<br><span class="muted">${o.payment_method === 'cny' ? '微信/支付宝' : (o.payment_method === 'usdt' ? 'USDT' : '')} ${o.tx_hash || ''}</span>${o.code ? '<br>码：<b>' + o.code + '</b>' : ''}</td>
       <td><span class="st ${o.status}">${STATUS_TEXT[o.status] || o.status}</span></td>
       <td>${ops}</td></tr>`;
   }).join('') || '<tr><td colspan="5" class="muted">暂无订单</td></tr>';

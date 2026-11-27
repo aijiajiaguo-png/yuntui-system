@@ -46,20 +46,29 @@
     <h1 style="font-size:16px">付款</h1>
     <div>订单号：<b id="oNo"></b></div>
     <div style="margin-top:6px">商品：<span id="oProduct"></span></div>
-    <div style="margin-top:6px">应付：<span class="price">¥<span id="oPrice"></span></span>
-      <span class="muted">（约 <b id="oUsdt"></b> USDT）</span></div>
-    <div id="payUsdt" style="margin-top:10px">
-      <div class="muted">USDT 收款地址（<span id="oNet"></span>，请按上方 USDT 金额精确转账）：</div>
-      <div class="addr" id="oAddr"></div>
-      <button class="btn-ghost" onclick="copyText($('oAddr').textContent, '地址已复制')">复制地址</button>
-      <button class="btn-ghost" onclick="copyText($('oUsdt').textContent, '金额已复制')">复制金额</button>
+    <div style="margin-top:6px">应付：<span class="price">¥<span id="oPrice"></span></span></div>
+    <div style="margin-top:12px">
+      <b>微信 / 支付宝付款（推荐）</b>
+      <div class="muted" style="margin-top:4px">加客服 <b id="oContact"></b>，转账 <b>¥<span id="oCny"></span></b>，备注订单号 <b id="oNo2"></b></div>
+      <div style="margin-top:6px">
+        <button class="btn-ghost" onclick="copyText($('oContact').textContent, '客服已复制')">复制客服</button>
+        <button class="btn-ghost" onclick="copyText($('oCny').textContent, '金额已复制')">复制金额</button>
+      </div>
+      <button class="btn-primary" style="margin-top:8px" onclick="markPaid()">我已付款，通知客服确认</button>
     </div>
-    <div class="muted" id="payAlt" style="margin-top:8px"></div>
-    <div style="margin-top:10px">
+    <div id="payUsdt" style="margin-top:14px; border-top:1px solid #eee; padding-top:10px">
+      <b style="font-size:14px">USDT 付款（海外客户）</b>
+      <div class="muted" style="margin-top:4px">约 <b id="oUsdt"></b> USDT，网络 <span id="oNet"></span>，请按 USDT 金额精确转账：</div>
+      <div class="addr" id="oAddr"></div>
+      <div style="margin-top:6px">
+        <button class="btn-ghost" onclick="copyText($('oAddr').textContent, '地址已复制')">复制地址</button>
+        <button class="btn-ghost" onclick="copyText($('oUsdt').textContent, '金额已复制')">复制金额</button>
+      </div>
       <input id="txHash" placeholder="粘贴交易哈希（TxHash），付款后提交">
       <button class="btn-primary" onclick="submitTx()">我已付款，提交交易哈希</button>
     </div>
-    <div class="muted" style="margin-top:8px">提交后请在下方查单；客服确认收款后自动发码。订单号请保存好，查单和售后都要用。</div>
+    <div class="muted" id="payUsdtOff" style="margin-top:10px; display:none">USDT 付款请联系客服开通。</div>
+    <div class="muted" style="margin-top:8px">付款后请在下方查单；客服确认收款后自动发码。订单号请保存好，查单和售后都要用。</div>
   </div>
 
   <div class="card">
@@ -112,15 +121,29 @@ async function createOrder(pid) {
   ORDER = r;
   $('orderCard').style.display = 'block';
   $('oNo').textContent = r.order_no;
-  $('oProduct').textContent = '';
+  $('oNo2').textContent = r.order_no;
+  $('oProduct').textContent = r.product_name || '';
   $('oPrice').textContent = r.price;
-  $('oUsdt').textContent = r.usdt_amount;
-  $('oNet').textContent = SHOP.usdt_network || '';
-  $('oAddr').textContent = r.usdt_address || '（店主尚未设置收款地址，请联系客服）';
-  $('payAlt').textContent = SHOP.contact ? ('或联系客服 ' + SHOP.contact + ' 微信/支付宝转账，备注订单号 ' + r.order_no) : '';
+  $('oCny').textContent = r.price;
+  $('oContact').textContent = SHOP.contact || r.contact || '请联系客服';
+  if (r.usdt_address) {
+    $('payUsdt').style.display = 'block';
+    $('payUsdtOff').style.display = 'none';
+    $('oUsdt').textContent = r.usdt_amount;
+    $('oNet').textContent = SHOP.usdt_network || '';
+    $('oAddr').textContent = r.usdt_address;
+  } else {
+    $('payUsdt').style.display = 'none';
+    $('payUsdtOff').style.display = 'block';
+  }
   $('qNo').value = r.order_no;
   window.scrollTo(0, $('orderCard').offsetTop);
   toast('订单已创建：' + r.order_no);
+}
+async function markPaid() {
+  if (!ORDER) return toast('先下单');
+  const r = await api('/api/shop/orders/' + ORDER.order_no + '/paid', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({method: 'cny'})});
+  if (r.ok) { toast('已通知客服，请等确认收款'); queryOrder(); } else toast(r.error || '提交失败');
 }
 async function submitTx() {
   if (!ORDER) return toast('先下单');
